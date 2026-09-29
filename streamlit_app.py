@@ -238,9 +238,9 @@ else:
         st.markdown('<div class="section-title"><span class="step-num">1</span> Multi-Model Data API</div>', unsafe_allow_html=True)
         col_api1, col_api2 = st.columns(2)
         with col_api1:
-            api_login = st.text_input("DataForSEO API Login (Email)", value=st.session_state.get("f_login", "info@todayseoworld.com"), placeholder="your-login@email.com")
+            api_login = st.text_input("DataForSEO API Login (Email)", value=st.session_state.get("f_login", "seo@rockettech.in"), placeholder="your-login@email.com")
         with col_api2:
-            api_password = st.text_input("DataForSEO API Password", value=st.session_state.get("f_pass", "184b31278d5f1549"), type="password", placeholder="••••••••")
+            api_password = st.text_input("DataForSEO API Password", value=st.session_state.get("f_pass", "Parmar@5690"), type="password", placeholder="••••••••")
 
         use_demo = st.checkbox("⚡ Use Instant Demo Mode (Simulates tracking without requiring API credit)", value=False)
         st.caption("Uncheck Demo Mode to run live queries with your DataForSEO credentials.")
