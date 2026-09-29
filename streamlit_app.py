@@ -12,9 +12,13 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from flask import render_template
-from app import app as flask_app, init_db, create_run, save_result, save_competitor_metrics, get_run, get_results, get_competitor_metrics, get_history, DataForSeoClient
+from app import (
+    app as flask_app, init_db, create_run, save_result, save_competitor_metrics,
+    get_run, get_results, get_competitor_metrics, get_history, DataForSeoClient,
+    extract_urls_from_text, extract_domains_from_text
+)
 
-# Explicitly bind template folder path for Jinja2 on Streamlit Cloud (Linux)
+# Explicitly bind template folder path for Jinja2 on Streamlit Cloud
 template_dir = os.path.join(root_dir, "templates")
 flask_app.template_folder = template_dir
 
@@ -29,160 +33,109 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS to hide Streamlit Chrome & Expand Content to 100% width
+# Custom Styling to match Tailwind / Violet theme
 st.markdown("""
 <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    [data-testid="stHeader"] {display: none;}
-    [data-testid="stSidebar"] {display: none;}
-    .block-container {
-        padding: 0rem !important;
-        margin: 0rem !important;
-        max-width: 100% !important;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
     }
-    iframe {
-        width: 100% !important;
+    #MainMenu, footer, header, [data-testid="stHeader"], [data-testid="stSidebar"] {
+        display: none !important;
+    }
+    .block-container {
+        padding: 1.5rem 2rem !important;
+        max-width: 900px !important;
+        margin: 0 auto !important;
+    }
+    .main-header {
+        margin-bottom: 1.5rem;
+    }
+    .badge-step {
+        background: #EDE9FE;
+        color: #6D28D9;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: inline-block;
+        margin-bottom: 6px;
+    }
+    .section-box {
+        background: #ffffff;
+        border: 1px solid #E2E8F0;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    .section-title {
+        font-size: 15px;
+        font-weight: 800;
+        color: #0F172A;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .step-num {
+        background: #EDE9FE;
+        color: #7C3AED;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 900;
+    }
+    div[data-testid="stForm"] {
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 20px !important;
+        padding: 24px !important;
+        background: #FFFFFF !important;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.06) !important;
+    }
+    div[data-testid="stFormSubmitButton"] > button {
+        background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%) !important;
+        color: white !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+        padding: 14px 28px !important;
+        border-radius: 14px !important;
         border: none !important;
+        width: 100% !important;
+        box-shadow: 0 10px 15px -3px rgba(124, 58, 237, 0.3) !important;
+        transition: all 0.2s ease !important;
+    }
+    div[data-testid="stFormSubmitButton"] > button:hover {
+        opacity: 0.95 !important;
+        transform: translateY(-1px) !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Handle Form Submissions via Streamlit query parameters / session state
+# Handle Reset / New Audit action
 query_params = st.query_params
-
-if "run_action" in query_params:
-    action = query_params["run_action"]
-    if action == "reset":
-        if "current_run_id" in st.session_state:
-            del st.session_state["current_run_id"]
-        st.query_params.clear()
-        st.rerun()
-
-# Handle POST data from embedded HTML form
-if "submit_payload" in st.session_state:
-    payload = st.session_state["submit_payload"]
-    del st.session_state["submit_payload"]
-    
-    brand_domain = (payload.get("brand_domain") or "example.com").strip()
-    brand_name = (payload.get("brand_name") or "Your Brand").strip()
-    country = payload.get("country", "United States")
-    language = payload.get("language", "en")
-    competitors = payload.get("competitors", [])
-    keywords = payload.get("keywords", [])
-    use_demo = payload.get("use_demo", True)
-    api_login = payload.get("api_login", "")
-    api_password = payload.get("api_password", "")
-
-    run_id = create_run(brand_domain, brand_name, country, language)
-    st.session_state["current_run_id"] = run_id
-
-    # Run execution
-    client = None
-    if not use_demo and api_login and api_password:
-        client = DataForSeoClient(api_login, api_password)
-    else:
-        use_demo = True
-
-    clean_brand_domain = brand_domain.lower()
-    clean_brand_name = brand_name.lower()
-    clean_competitors = [c.lower() for c in competitors if c.strip()]
-    domain_mentions = {domain: 0 for domain in [clean_brand_domain] + clean_competitors}
-
-    platforms = [
-        ("google", "Google AI Mode"),
-        ("chat_gpt", "ChatGPT"),
-        ("perplexity", "Perplexity"),
-        ("gemini", "Gemini"),
-        ("claude", "Claude")
-    ]
-
-    total_steps = len(keywords) * len(platforms)
-    current_step = 0
-
-    for keyword in keywords:
-        for platform_key, platform_name in platforms:
-            current_step += 1
-
-            result = None
-            if not use_demo and client:
-                try:
-                    if platform_key == "google":
-                        res = client.check_google_ai_mode(keyword, country, language)
-                    elif platform_key == "chat_gpt":
-                        res = client.check_chatgpt(keyword)
-                    elif platform_key == "perplexity":
-                        res = client.check_perplexity(keyword)
-                    elif platform_key == "gemini":
-                        res = client.check_gemini(keyword)
-                    elif platform_key == "claude":
-                        res = client.check_claude(keyword)
-
-                    if res and not res.get("error"):
-                        result = {"text": res.get("text", ""), "sources": res.get("sources", [])}
-                    else:
-                        result = {"text": f"⚠️ DataForSEO API Notice: {res.get('error') if res else 'No response'}", "sources": []}
-                except Exception as ex:
-                    result = {"text": f"⚠️ Query Exception: {ex}", "sources": []}
-
-            if use_demo or not result:
-                time.sleep(0.05)
-                is_brand_mentioned = random.choice([True, True, False])
-                comp_mentioned = [c for c in clean_competitors if random.choice([True, False])]
-
-                text_parts = [f"Summary for '{keyword}' on {platform_name}:"]
-                sources = []
-
-                if is_brand_mentioned:
-                    text_parts.append(f"Top recommendation includes {brand_name} ({clean_brand_domain}) for comprehensive {keyword} solutions.")
-                    sources.append(f"https://{clean_brand_domain}/overview")
-                else:
-                    text_parts.append(f"Leading platforms evaluated for {keyword}.")
-
-                for comp in comp_mentioned:
-                    text_parts.append(f"Alternative: {comp.capitalize()} ({comp}).")
-                    sources.append(f"https://{comp}/features")
-
-                result = {"text": "\n".join(text_parts), "sources": sources}
-
-            text_lower = result["text"].lower()
-            mentioned = clean_brand_domain in text_lower or clean_brand_name in text_lower
-
-            if mentioned:
-                domain_mentions[clean_brand_domain] += 1
-
-            competitor_mentions = []
-            for comp in clean_competitors:
-                if comp in text_lower:
-                    competitor_mentions.append(comp)
-                    domain_mentions[comp] += 1
-
-            save_result(
-                run_id=run_id,
-                keyword=keyword,
-                platform=platform_key,
-                mentioned=mentioned,
-                mention_position=1 if mentioned else None,
-                sources_cited=result["sources"],
-                competitor_mentions=competitor_mentions,
-                ai_response_text=result["text"]
-            )
-
-    for domain, mentions in domain_mentions.items():
-        sov = (mentions / total_steps) * 100 if total_steps > 0 else 0
-        save_competitor_metrics(run_id, domain, mentions, None, round(sov, 1))
-
+if "run_action" in query_params and query_params["run_action"] == "reset":
+    if "current_run_id" in st.session_state:
+        del st.session_state["current_run_id"]
+    st.query_params.clear()
     st.rerun()
 
-# Display Page View
-run_id = st.session_state.get("current_run_id")
+# Check if dashboard should be shown
+current_run_id = st.session_state.get("current_run_id")
 
-with flask_app.test_request_context():
-    if run_id:
-        run_data = get_run(run_id)
-        results = get_results(run_id)
-        metrics = get_competitor_metrics(run_id)
+if current_run_id:
+    # Display Results Dashboard
+    with flask_app.test_request_context():
+        run_data = get_run(current_run_id)
+        results = get_results(current_run_id)
+        metrics = get_competitor_metrics(current_run_id)
         
         keywords = list(set([r["keyword"] for r in results]))
         platforms = ["google", "chat_gpt", "perplexity", "gemini", "claude"]
@@ -215,59 +168,242 @@ with flask_app.test_request_context():
             history=history,
             json=json
         )
-        components.html(rendered_html, height=1350, scrolling=True)
-    else:
-        rendered_html = render_template("setup.html")
-        
-        # Inject JS form interceptor to bridge HTML form submission into Streamlit session state
-        bridge_script = """
+
+        # Inject Reset link listener into Dashboard HTML
+        reset_bridge = """
         <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('setupForm');
-            if(form) {
-                form.onsubmit = function(e) {
+            const auditLinks = document.querySelectorAll('a[href="/"]');
+            auditLinks.forEach(link => {
+                link.onclick = function(e) {
                     e.preventDefault();
-                    const competitors = Array.from(document.querySelectorAll('.competitor-input'))
-                        .map(i => i.value.trim())
-                        .filter(v => v);
-                    const keywords_high = document.getElementById('keywords_high').value.split('\\n').map(k => k.trim()).filter(k => k);
-                    const keywords_brand = document.getElementById('keywords_brand').value.split('\\n').map(k => k.trim()).filter(k => k);
-                    
-                    const payload = {
-                        api_login: document.getElementById('api_login').value,
-                        api_password: document.getElementById('api_password').value,
-                        use_demo: document.getElementById('use_demo').checked,
-                        brand_domain: document.getElementById('brand_domain').value,
-                        brand_name: document.getElementById('brand_name').value,
-                        country: document.getElementById('country').value,
-                        language: document.getElementById('language').value,
-                        competitors: competitors,
-                        keywords: keywords_high.concat(keywords_brand)
-                    };
-
-                    window.parent.postMessage({type: 'streamlit_submit', data: payload}, '*');
-                }
-            }
+                    window.parent.location.search = '?run_action=reset';
+                };
+            });
         });
         </script>
         """
-        
-        # Add JS event receiver in Streamlit component
-        full_html = rendered_html.replace("</body>", bridge_script + "</body>")
-        components.html(full_html, height=1100, scrolling=True)
+        full_dashboard = rendered_html.replace("</body>", reset_bridge + "</body>")
 
-# Streamlit JS Message Listener for Form Submit
-st.markdown("""
-<script>
-window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'streamlit_submit') {
-        const payload = JSON.stringify(event.data.data);
-        const input = window.parent.document.querySelector('input[data-testid="stCustomSubmitPayload"]');
-        if (input) {
-            input.value = payload;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-    }
-});
-</script>
-""", unsafe_allow_html=True)
+        # Top reset button in Streamlit header
+        col1, col2 = st.columns([8, 2])
+        with col2:
+            if st.button("← New Audit", use_container_width=True):
+                del st.session_state["current_run_id"]
+                st.rerun()
+
+        components.html(full_dashboard, height=1400, scrolling=True)
+
+else:
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <span class="badge-step">Campaign Setup • Step 1 of 2</span>
+        <h2 style="font-size: 28px; font-weight: 900; color: #0F172A; margin: 4px 0;">Setup AI Mention Tracker Audit</h2>
+        <p style="color: #64748B; font-size: 14px; margin: 0;">Analyze your brand visibility, share of voice, and cited sources across Google AI, ChatGPT, Perplexity, Gemini & Claude.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Preset Selection Buttons
+    pcol1, pcol2 = st.columns(2)
+    with pcol1:
+        if st.button("📚 Load Ebook Services Preset", use_container_width=True):
+            st.session_state["f_domain"] = "damcogroup.com"
+            st.session_state["f_name"] = "Damco Solutions"
+            st.session_state["f_comps"] = "innodata.com\nebookifi.com\nebooks2go.net"
+            st.session_state["f_keywords"] = "best ebook conversion companies\nebook formatting and conversion services"
+            st.rerun()
+    with pcol2:
+        if st.button("🚀 Load Marketing Agency Preset", use_container_width=True):
+            st.session_state["f_domain"] = "webfx.com"
+            st.session_state["f_name"] = "WebFX"
+            st.session_state["f_comps"] = "ignitevisibility.com\nsmartites.com\ndisruptiveadvertising.com"
+            st.session_state["f_keywords"] = "best digital marketing agency for enterprise\ntop seo companies"
+            st.rerun()
+
+    # Main Setup Form
+    with st.form("setup_tracker_form"):
+        # Section 1: API Configuration
+        st.markdown('<div class="section-title"><span class="step-num">1</span> Multi-Model Data API</div>', unsafe_allow_html=True)
+        col_api1, col_api2 = st.columns(2)
+        with col_api1:
+            api_login = st.text_input("DataForSEO API Login (Email)", value=st.session_state.get("f_login", "info@todayseoworld.com"), placeholder="your-login@email.com")
+        with col_api2:
+            api_password = st.text_input("DataForSEO API Password", value=st.session_state.get("f_pass", "184b31278d5f1549"), type="password", placeholder="••••••••")
+
+        use_demo = st.checkbox("⚡ Use Instant Demo Mode (Simulates tracking without requiring API credit)", value=False)
+        st.caption("Uncheck Demo Mode to run live queries with your DataForSEO credentials.")
+
+        # Section 2: Target Brand Profile
+        st.markdown('<div class="section-title" style="margin-top: 15px;"><span class="step-num">2</span> Target Brand Profile</div>', unsafe_allow_html=True)
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            brand_domain = st.text_input("Brand Domain *", value=st.session_state.get("f_domain", "damcogroup.com"), placeholder="damcogroup.com")
+        with col_b2:
+            brand_name = st.text_input("Brand Name *", value=st.session_state.get("f_name", "Damco Solutions"), placeholder="Damco Solutions")
+
+        col_loc1, col_loc2 = st.columns(2)
+        with col_loc1:
+            country = st.selectbox("Target Market Country", ["United States", "United Kingdom", "India", "Canada", "Australia"], index=0)
+        with col_loc2:
+            language = st.selectbox("Target Language", ["en", "es", "fr", "de"], index=0)
+
+        # Section 3: Competitors
+        st.markdown('<div class="section-title" style="margin-top: 15px;"><span class="step-num">3</span> Competitor Domains</div>', unsafe_allow_html=True)
+        competitors_raw = st.text_area("Competitors (one domain per line)", value=st.session_state.get("f_comps", "innodata.com\nebookifi.com\nebooks2go.net"), height=85, placeholder="competitor1.com\ncompetitor2.com")
+
+        # Section 4: Keywords
+        st.markdown('<div class="section-title" style="margin-top: 15px;"><span class="step-num">4</span> Keywords to Track</div>', unsafe_allow_html=True)
+        keywords_raw = st.text_area("Search Queries (one per line) *", value=st.session_state.get("f_keywords", "best ebook conversion companies"), height=85, placeholder="best ebook conversion companies")
+
+        # Submit Button
+        submitted = st.form_submit_button("🚀 Run AI Mention Tracker", use_container_width=True)
+
+    if submitted:
+        # Validate inputs
+        if not brand_domain or not brand_name:
+            st.error("Please provide both Brand Domain and Brand Name.")
+            st.stop()
+
+        keywords = [k.strip() for k in keywords_raw.split("\n") if k.strip()]
+        if not keywords:
+            st.error("Please enter at least one keyword to track.")
+            st.stop()
+
+        competitors = [c.strip() for c in competitors_raw.split("\n") if c.strip()]
+
+        # Determine Demo vs Live
+        if not api_login or not api_password or use_demo:
+            is_demo = True
+            client = None
+        else:
+            is_demo = False
+            client = DataForSeoClient(api_login, api_password)
+
+        # Create Run in SQLite
+        run_id = create_run(brand_domain, brand_name, country, language)
+        st.session_state["current_run_id"] = run_id
+
+        # Live Progress UI
+        clean_brand_domain = brand_domain.lower()
+        clean_brand_name = brand_name.lower()
+        clean_competitors = [c.lower() for c in competitors if c.strip()]
+        domain_mentions = {domain: 0 for domain in [clean_brand_domain] + clean_competitors}
+
+        platforms = [
+            ("google", "Google AI Mode"),
+            ("chat_gpt", "ChatGPT"),
+            ("perplexity", "Perplexity"),
+            ("gemini", "Gemini"),
+            ("claude", "Claude")
+        ]
+
+        total_steps = len(keywords) * len(platforms)
+        current_step = 0
+
+        progress_bar = st.progress(0.0)
+        status_box = st.status("🔍 Analyzing AI visibility across models...", expanded=True)
+
+        with status_box:
+            for keyword in keywords:
+                for platform_key, platform_name in platforms:
+                    current_step += 1
+                    progress_pct = current_step / total_steps
+                    progress_bar.progress(progress_pct)
+                    status_box.write(f"[{current_step}/{total_steps}] Querying **{platform_name}** for *'{keyword}'*...")
+
+                    result = None
+                    if not is_demo and client:
+                        try:
+                            if platform_key == "google":
+                                res = client.check_google_ai_mode(keyword, country, language)
+                            elif platform_key == "chat_gpt":
+                                res = client.check_chatgpt(keyword)
+                            elif platform_key == "perplexity":
+                                res = client.check_perplexity(keyword)
+                            elif platform_key == "gemini":
+                                res = client.check_gemini(keyword)
+                            elif platform_key == "claude":
+                                res = client.check_claude(keyword)
+
+                            if res and not res.get("error"):
+                                result = {
+                                    "text": res.get("text", ""),
+                                    "sources": res.get("sources", [])
+                                }
+                            else:
+                                err_msg = res.get("error") if res else "No response returned"
+                                result = {
+                                    "text": f"⚠️ DataForSEO API Notice: {err_msg}",
+                                    "sources": []
+                                }
+                        except Exception as ex:
+                            result = {
+                                "text": f"⚠️ Query Exception: {ex}",
+                                "sources": []
+                            }
+
+                    if is_demo or not result:
+                        time.sleep(0.3)
+                        is_brand_mentioned = random.choice([True, True, False])
+                        comp_mentioned = [c for c in clean_competitors if random.choice([True, False])]
+
+                        text_parts = [f"Summary for '{keyword}' on {platform_name}:"]
+                        sources = []
+
+                        if is_brand_mentioned:
+                            text_parts.append(f"Top recommendations include {brand_name} ({clean_brand_domain}) for enterprise {keyword} solutions.")
+                            sources.append(f"https://{clean_brand_domain}/overview")
+                        else:
+                            text_parts.append(f"Leading platforms evaluated for {keyword}.")
+
+                        for comp in comp_mentioned:
+                            text_parts.append(f"Alternative: {comp.capitalize()} ({comp}).")
+                            sources.append(f"https://{comp}/features")
+
+                        result = {
+                            "text": "\n".join(text_parts),
+                            "sources": sources
+                        }
+
+                    # Mentions detection
+                    text_lower = result["text"].lower()
+                    mentioned = clean_brand_domain in text_lower or clean_brand_name in text_lower
+
+                    if mentioned:
+                        domain_mentions[clean_brand_domain] += 1
+
+                    competitor_mentions = []
+                    for comp in clean_competitors:
+                        if comp in text_lower:
+                            competitor_mentions.append(comp)
+                            domain_mentions[comp] += 1
+
+                    # Discover all other brand domains in text
+                    discovered_domains = extract_domains_from_text(result["text"])
+                    for dom in discovered_domains:
+                        if dom != clean_brand_domain and dom not in competitor_mentions and dom not in clean_competitors:
+                            competitor_mentions.append(dom)
+                            if dom not in domain_mentions:
+                                domain_mentions[dom] = 0
+                            domain_mentions[dom] += 1
+
+                    save_result(
+                        run_id=run_id,
+                        keyword=keyword,
+                        platform=platform_key,
+                        mentioned=mentioned,
+                        mention_position=1 if mentioned else None,
+                        sources_cited=result["sources"],
+                        competitor_mentions=competitor_mentions,
+                        ai_response_text=result["text"]
+                    )
+
+            # Compute Share of Voice
+            for domain, mentions in domain_mentions.items():
+                sov = (mentions / total_steps) * 100 if total_steps > 0 else 0
+                save_competitor_metrics(run_id, domain, mentions, None, round(sov, 1))
+
+            status_box.update(label="✅ Audit Complete! Rendering dashboard...", state="complete")
+
+        st.rerun()
