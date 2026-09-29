@@ -221,7 +221,7 @@ else:
         if st.button("📚 Load Ebook Services Preset", use_container_width=True):
             st.session_state["f_domain"] = "damcogroup.com"
             st.session_state["f_name"] = "Damco Solutions"
-            st.session_state["f_comps"] = "innodata.com\nebookifi.com\nebooks2go.net\nsuntecindia.com"
+            st.session_state["f_comps"] = "suntecindia.com"
             st.session_state["f_keywords"] = "top ebook conversion companies for enterprise\ntop data cleansing companies"
             st.rerun()
     with pcol2:
@@ -261,7 +261,7 @@ else:
 
         # Section 3: Competitors
         st.markdown('<div class="section-title" style="margin-top: 15px;"><span class="step-num">3</span> Competitor Domains</div>', unsafe_allow_html=True)
-        competitors_raw = st.text_area("Competitors (one domain per line)", value=st.session_state.get("f_comps", "innodata.com\nebookifi.com\nebooks2go.net\nsuntecindia.com"), height=85, placeholder="competitor1.com\ncompetitor2.com")
+        competitors_raw = st.text_area("Competitors (one domain per line)", value=st.session_state.get("f_comps", "suntecindia.com"), height=85, placeholder="suntecindia.com")
 
         # Section 4: Keywords (Defaults set as requested)
         st.markdown('<div class="section-title" style="margin-top: 15px;"><span class="step-num">4</span> Keywords to Track</div>', unsafe_allow_html=True)
